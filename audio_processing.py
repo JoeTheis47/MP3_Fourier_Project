@@ -23,32 +23,36 @@ norm_freq = []
 amplitudes = []
 
 
-## set up various analysis tools
+## set up tools
+# identify and extract the file
 sample_rate,values = scipy.io.wavfile.read(r"C:\Users\joeth\Downloads\BgBsB3.wav")
 sample_num = len(values)
 
+# detect sudden changes in amplitude
 frames,frame_quantity = onset_detection(values,frame_length) # separates the values into frames of a set length to observe overall amplitude
 spectral_energy = np.zeros(frame_quantity)
 
-# setting up the spectral flux, and identifying guitar strike times ______
+# set up the spectral flux
 for j in range(0,frame_quantity):
     for i in frames[j,:]:
-        spectral_energy[j] += i
+        spectral_energy[j] += i # sum everything held in each frame for future comparison
 
-guitar_strikes,properties = scipy.signal.find_peaks(spectral_energy,prominence = np.std(spectral_energy),distance = 4)
+# identify sudden amplitude changes higher than the standard deviation
+guitar_strikes,properties = scipy.signal.find_peaks(spectral_energy,prominence = np.std(spectral_energy),distance = 4) 
 strikes = range(0,len(guitar_strikes))
 
-
+## the actual processing part of it
 for i in strikes:
     segments = values [guitar_strikes[i]*frame_length : (guitar_strikes[i] + frames_analyzed) * frame_length ]
-    frequencies = np.array(np.fft.rfftfreq(len(segments),1/sample_rate))
+    # segment the frames into small groupings of frames after guitar strikes, and then analyze each successively
+    frequencies = np.array(np.fft.rfftfreq(len(segments),1/sample_rate)) # frequencies may change size depending on the number of points in each bin, so redefine every iteration
 
     struck_freq_amps = np.abs(np.fft.rfft(segments))
     max_freq = np.argmax(struck_freq_amps)
     amps = struck_freq_amps[max_freq:]
 
-    amplitudes.append(amps/np.max(amps))
-    norm_freq.append(frequencies[max_freq:] / frequencies[max_freq])
+    amplitudes.append(amps/np.max(amps)) # normalize the amplitudes
+    norm_freq.append(frequencies[max_freq:] / frequencies[max_freq]) # normalize the frequencies
 
 ## Testing area
 ##________________________________________________________
