@@ -1,38 +1,59 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import librosa
+import scipy
 
-def find_index_max(array):
-  ## a function which returns the index of the local maximums of an input list
-    output_array = np.zeros(len(array))
-    for i in range(1,len(array)-1):
-        try:
-            if (array[i] >= array[i+1]) and (array[i] >= array[i-1]): ## if the number is greater than either of its neighbors
-                output_array [i] = array[i]                           ## add it to the array
-        except ValueError: ## just in case
-            break
-    return [i for i,val in enumerate(output_array) if val != 0] ## output all non-zero values in the array of maxes
+def onset_detection(array,frame_size):
 
-##values,sample_rate = librosa.load("file path") ## to be included when I get the files
-max_value = 10
-sample_num = 100
-sample_rate = int(sample_num/max_value)
+    subdivisions = len(array)//frame_size
+    frame = np.zeros(frame_size)
+    result = np.zeros((subdivisions,frame_size//2+1))
+    window = np.hanning(frame_size)
 
-## this section is just for testing purposes. Remove when actual files are being analyzed
-t = np.linspace(0,10,sample_num)
-values = np.sin(4*np.pi*t) + np.sin(2*np.pi*t)
-fourier = np.fft.fft(values)
+    for i in range(0,subdivisions):
+        frame = array[i*frame_size:(i+1)*frame_size]*window
+        result[i,:] = np.abs(np.fft.rfft(frame))
 
-amplitude  = np.abs(fourier)
-frequencies = np.fft.fftfreq(len(values),1/sample_rate)
+    return result,subdivisions
 
-index_val = find_index_max(amplitude)      ## find the index value where the amplitude of th waves are maximized
-frequency_ticks =  [frequencies[index_val[num]] for num in range(0,len(index_val))] ## and put ticks on them
+# define variables and designate vector spaces
+frame_length = 1024
+frames_analyzed = 4
 
-## Printing
-ax = plt.subplot()
-ax.plot(frequencies,amplitude,'b-')
-ax.set_xticks(frequency_ticks) ## this is to show where the local maxes of the function are.
-plt.xlabel("frequency")
-plt.ylabel("Intensity")
+norm_freq = []
+amplitudes = []
+
+
+## set up various analysis tools
+sample_rate,values = scipy.io.wavfile.read(r"C:\Users\joeth\Downloads\BgBsB3.wav")
+sample_num = len(values)
+
+frames,frame_quantity = onset_detection(values,frame_length) # separates the values into frames of a set length to observe overall amplitude
+spectral_energy = np.zeros(frame_quantity)
+
+# setting up the spectral flux, and identifying guitar strike times ______
+for j in range(0,frame_quantity):
+    for i in frames[j,:]:
+        spectral_energy[j] += i
+
+guitar_strikes,properties = scipy.signal.find_peaks(spectral_energy,prominence = np.std(spectral_energy),distance = 4)
+strikes = range(0,len(guitar_strikes))
+
+
+for i in strikes:
+    segments = values [guitar_strikes[i]*frame_length : (guitar_strikes[i] + frames_analyzed) * frame_length ]
+    frequencies = np.array(np.fft.rfftfreq(len(segments),1/sample_rate))
+
+    struck_freq_amps = np.abs(np.fft.rfft(segments))
+    max_freq = np.argmax(struck_freq_amps)
+    amps = struck_freq_amps[max_freq:]
+
+    amplitudes.append(amps/np.max(amps))
+    norm_freq.append(frequencies[max_freq:] / frequencies[max_freq])
+
+## Testing area
+##________________________________________________________
+
+fig,ax = plt.subplots(ncols=len(guitar_strikes))
+for i in strikes:
+    ax[i].plot(norm_freq[i],amplitudes[i],'b-')
 plt.show()
