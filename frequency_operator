@@ -1,3 +1,7 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+
 class freq_operator:
     def __init__(self,segment,sample_rate,harmonics_observed):
 
