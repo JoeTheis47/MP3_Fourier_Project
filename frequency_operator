@@ -1,0 +1,28 @@
+class freq_operator:
+    def __init__(self,segment,sample_rate,harmonics_observed):
+
+        self.frequencies = np.array(np.fft.rfftfreq(len(segment),1/sample_rate)) # frequencies may change size depending on the number of points in each bin, so redefine every iteration
+        self.segment = segment
+        self.sample_rate = sample_rate
+        self.harmonics_observed = harmonics_observed
+
+        self.root_frequency,self.struck_freq_amps = self.root_frequency_detection()
+        self.harmonics_idx = self.higher_harmonics_list()
+
+    def higher_harmonics_list(self):
+        higher_harmonics = np.arange(1,self.harmonics_observed + 1)*self.root_frequency    # create a list of higher harmonics
+        return [round(i*len(self.segment)/sample_rate) for i in higher_harmonics if round(i*len(self.segment)/sample_rate) < frame_length] # find the amplitude roughly around each of the higher harmonics
+    
+    def root_frequency_detection(self):
+        # takes a segment as an input, with 
+        struck_freq_amps = np.abs(np.fft.rfft(self.segment)) # the amplitudes of all the frequencies
+        root_freq = int(autocorrelation(self.segment,self.sample_rate))   # this roughly determines the root frequency
+        root_freq_rough_idx = round(root_freq/self.sample_rate*len(self.segment))  # finds the index of the frequecy closest to the root frequency
+        root_freq_idx = root_freq_rough_idx - 2 + np.argmax(struck_freq_amps[root_freq_rough_idx-2:root_freq_rough_idx+3])
+        return self.frequencies[root_freq_idx],struck_freq_amps
+
+    
+    def amplitude_detection(self):
+        amps = np.array([np.max(self.struck_freq_amps[j-2:j+3]) for j in self.harmonics_idx])       # find the amplitudes of the harmonics by finding the peaks around
+                # the estimated harmonics, then using those ( the radius for the search is 2 at the moment)
+        return amps/np.max(amps) # normalize the amplitudes
