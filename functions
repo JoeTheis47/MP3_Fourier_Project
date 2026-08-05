@@ -1,0 +1,45 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+
+def subdivide(array,frame_size):
+# breaks down the array into a matrix, where each row holds a segment of sample to use a fourier transform on
+    subdivisions = (len(array)-frame_size)//frame_size*2 # you have to remove the final frame, because its size is so varable, its likely not helpful
+    result = np.zeros((subdivisions,frame_size//2+1))
+    window = np.hanning(frame_size)
+
+    for i in range(0,subdivisions):
+        frame = array[ i*frame_size//2 : i*frame_size//2 + frame_size ] * window
+        result[i,:] = np.abs(np.fft.rfft(frame))
+
+    return result,subdivisions
+
+def autocorrelation(segment,sample_rate):
+    # determines the root of a strum. Essentially, it adds a shifted version of the segment to itself, 
+    # then looks at the maximum total of that sitting within range of the guitar. its a rough estimation of the 
+    # root, seeing as you round the shift to integer valus so that they can be used as bounds as well, but its accurate enough
+    autcor = np.correlate(segment,segment,mode = "full")[len(segment)-1:]
+
+    if sample_rate > 1500:
+        min_lag = sample_rate // 1300 # 1500 is the maximum output frequency of a guitar
+    else:
+        min_lag = 1
+    
+    max_lag = sample_rate // 82 # 80 is the minimum output frequency of a guitar
+    lag_tot = np.argmax(autcor[min_lag:max_lag]) + min_lag
+
+    return sample_rate/lag_tot
+        
+def flux(frame,frame_begin,frame_end,peram = None):
+    s_flux = []
+    if frame_begin < 1:
+        frame_begin = 1
+    for i in range(frame_begin,frame_end):
+        dev = frame[i] - frame[i-1]
+        if peram is not None:
+            if peram == "abs":
+                dev = np.abs(dev)
+            elif peram == "max":
+                dev = np.maximum(dev,0)
+        s_flux.append(np.sum(dev))
+    return s_flux
