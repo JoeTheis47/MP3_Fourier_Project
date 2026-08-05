@@ -1,3 +1,7 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+
 ## define variables and designate vector spaces______________________________
 frame_length = 2048         # how many samples that each frame that youre analyzing has
 frames_analyzed = 4         # how many frames around a guitar pick youll analyze
