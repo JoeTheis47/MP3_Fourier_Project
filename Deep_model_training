@@ -1,0 +1,42 @@
+import torch
+import scipy
+from audio_processing import onset_detection as od
+from audio_processing import freq_operator as fo
+import torch.nn as nn
+from deep_mod import model
+import numpy as np
+from pathlib import Path
+
+
+sorting_path = Path(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data")
+testing_files = []
+segs = []
+root_freq = []
+frames_analyzed = 4
+frame_length = 2048
+
+for i in sorting_path.iterdir():
+    sr,values = scipy.io.wavfile.read(i)
+    frames,guitar_strikes = od(values,frame_length,sr)
+    for j in range(0,len(guitar_strikes)):
+        segment = np.hanning(frames_analyzed//2*frame_length) * values[guitar_strikes[j]*frame_length//2 : (guitar_strikes[j] + frames_analyzed) * frame_length //2 ]
+        freq_obj = fo(segment,sr,17,frame_length)
+        root_freq.append(np.log2(freq_obj.root_frequency/440))
+        segs.append(np.log1p(np.abs(np.fft.rfft(segment))))
+# now we have a setup: we have a series of frames (held in seg), and a theoretical output for each (in root_freq)
+
+data_set = torch.tensor(np.stack(segs).astype(np.float32))
+target = torch.tensor(np.asarray(root_freq,dtype = np.float32))
+deep_model = model()
+
+opt = torch.optim.Adam(deep_model.parameters(),lr = .001)
+loss_func = nn.MSELoss()
+for i in range(0,len(root_freq),8):
+    pred_freq = deep_model(data_set[i:i+8].unsqueeze(1))
+    loss = loss_func(pred_freq.squeeze(1),target[i:i+8])
+
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+
+print("training complete")
