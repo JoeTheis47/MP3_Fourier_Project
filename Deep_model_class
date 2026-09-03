@@ -1,0 +1,87 @@
+import torch
+
+import torch.nn as nn
+
+import scipy
+
+from audio_processing import onset_detection as od
+
+import numpy as np
+
+class model(nn.Module):
+
+    def __init__(self):
+
+        super().__init__()
+
+        # set up 5 layers. The first 3 are to identify how the amplitudes change, making them convolutional layers, so that they
+
+        # can take in data coming in from a small section of time
+
+        #  the last two are linear layers, to connect and compact the information output from the convolutional layers into an
+
+        # estimation
+
+        self.L1 = nn.Conv1d(1,8,kernel_size=9,padding=4)
+
+        self.B1 = nn.BatchNorm1d(8)
+
+        self.L2 = nn.Conv1d(8,16,kernel_size = 9,padding = 4)
+
+        self.B2 = nn.BatchNorm1d(16)
+
+        self.L3 = nn.Conv1d(16,32,kernel_size=9,padding=4)
+
+        self.B3 = nn.BatchNorm1d(32)
+
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+        self.L4 = nn.Linear(32,32)
+
+        self.L5 = nn.Linear(32,1)
+
+    def forward(self,x):
+
+        # this forward function is a key one in Torch.Module, as it is immediately called if an input is given to the module function
+
+        # this one connects all the predefined layers and then returns their single number output. The model will be trained onto
+
+        # a logarithm of the root frequency output instead of the actual frequency because logarithmic frequecy increases linearly for frequency
+
+        x = nn.functional.relu(self.B1(self.L1(x))) # relu is a way that the compter identifies numbers too small to be relevant
+
+        # essentially, its a max(num,0), though apparently more efficient.
+
+        x = nn.functional.relu(self.B2(self.L2(x)))
+
+        x = nn.functional.relu(self.B3(self.L3(x)))
+
+        x = self.pool(x)
+
+        x = x.squeeze(-1)
+
+        x = nn.functional.relu(self.L4(x))
+
+        x = self.L5(x)
+
+        return x
+
+if __name__ == "__main__":
+
+# the structure is (batchsize,channels,samples)
+
+# there should always be just one channel for audio stuff, but batchsize may vary depending on the length of the input
+
+    sample_rate,values = scipy.io.wavfile.read(r"C:\Users**\j**oeth\Downloads\BgBsA2 (2).wav")
+
+    frames, guitar_strikes = od(values,2048,sample_rate)
+
+    analyzed_frames = torch.tensor(frames[guitar_strikes]).unsqueeze(1)
+
+    deep_model = model()
+
+    pred = deep_model(analyzed_frames.float())
+
+    target = torch.log2(torch.tensor([110 for i in guitar_strikes])/440).unsqueeze(1)
+
+    print(2**(pred - target)*440)
