@@ -12,10 +12,9 @@ if __name__ == "__main__":
     norm_freq = []
     amplitudes = []
     standard_deviation = []
-    
 ## set up tools_________________________________________________________
 # identify and extract the file
-    sample_rate,values = scipy.io.wavfile.read(r"C:\Users\joeth\Downloads\sound_data\BgGsE2.wav")
+    sample_rate,values = scipy.io.wavfile.read(r"C:\Users\joeth\OneDrive\Documents\deep_learning_learning_data\BgGsA2.wav")
     frames,guitar_strikes = onset_detection(values,frame_length,sample_rate)
     strikes = range(0,len(guitar_strikes))
     irregularity = np.zeros(len(guitar_strikes))
@@ -23,7 +22,6 @@ if __name__ == "__main__":
     ring_end = int(sample_rate*spec_flux_end/frame_length)
     window = np.hanning(frames_analyzed//2*frame_length)       # this is a multiplier which brings the ends of segments closer together, hile hardly
 # affecting the actual processing part for the fourier transform
-    
 ## the actual processing part of it_______________________________________________________
     for i in strikes:
         segment = window * values [guitar_strikes[i]*frame_length//2 : (guitar_strikes[i] + frames_analyzed) * frame_length //2 ]
@@ -36,19 +34,15 @@ if __name__ == "__main__":
         irregularity[i] = np.sum(np.diff(amps)**2)
         amplitudes.append(amps)
         norm_freq.append([freq_obj.frequencies[i]/root_freq for i in freq_obj.harmonics_idx]) # normalize the frequencies
-        
 ## Testing area________________________________________________________
 # note: atm, there are 3 possible axes: irregularity of the harmonics, the standard deviation of the spectral flux, and the harmonic centroid
 # So far, Ive found the most accurate to be harmonic centroid and std of spec-flux, but spec-flux could be effected by vibrato or something
-    
     clarity = [(norm_freq[i]@amplitudes[i])/np.sum(amplitudes[i]) for i in strikes]
     print(clarity)      # harmonic centroid
     print(standard_deviation)       # spectral flux (change in energy going out in each harmonic over time)
     print(irregularity)             # harmonic flux ()
     print(freq_obj.root_frequency)
-    
     plt.scatter(clarity,irregularity)
-    
     for i in strikes:
         plt.annotate(strikes[i]+1,(clarity[i],irregularity[i]))
     plt.xlabel("clarity (bad)")
@@ -60,3 +54,5 @@ if __name__ == "__main__":
         ax[i].plot(norm_freq[i],amplitudes[i],'b-')
     plt.show()
     '''
+## issues:
+# using different notes does not result in similar scales, even if the quality is (apparently) the same
