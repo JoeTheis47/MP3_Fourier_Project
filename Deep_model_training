@@ -1,42 +1,160 @@
-import torch
+from torch.utils.data import Dataset,DataLoader
 import scipy
-from audio_processing import onset_detection as od
-from audio_processing import freq_operator as fo
-import torch.nn as nn
-from deep_mod import model
-import numpy as np
 from pathlib import Path
+from audio_processing import onset_detection as os
+import torch
+import numpy as np
+import torch.nn as nn
+
+# for the verification of this model, input a file into line 103 with all the same conent
 
 
-sorting_path = Path(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data")
-testing_files = []
-segs = []
-root_freq = []
-frames_analyzed = 4
-frame_length = 2048
+class Audio_data_set(Dataset):
+    def __init__(self,audio_dir):
+        self.note_frequencies = {
+        "A2": 110,
+        "B3": 246.94,
+        "D3": 146.83,
+        "E2": 82.41,
+        "E4": 329.63,
+        "G3": 196.00}
 
-for i in sorting_path.iterdir():
-    sr,values = scipy.io.wavfile.read(i)
-    frames,guitar_strikes = od(values,frame_length,sr)
-    for j in range(0,len(guitar_strikes)):
-        segment = np.hanning(frames_analyzed//2*frame_length) * values[guitar_strikes[j]*frame_length//2 : (guitar_strikes[j] + frames_analyzed) * frame_length //2 ]
-        freq_obj = fo(segment,sr,17,frame_length)
-        root_freq.append(np.log2(freq_obj.root_frequency/440))
-        segs.append(np.log1p(np.abs(np.fft.rfft(segment))))
-# now we have a setup: we have a series of frames (held in seg), and a theoretical output for each (in root_freq)
+        self.audio_data,self.frequencies = self.open_data(audio_dir,2048,4)
 
-data_set = torch.tensor(np.stack(segs).astype(np.float32))
-target = torch.tensor(np.asarray(root_freq,dtype = np.float32))
-deep_model = model()
+    def __len__(self):
+        return len(self.frequencies)
+    
+    def __getitem__(self,index):
+        label = self.frequencies[index]
+        signal = self.audio_data[index]
+        return signal,label
 
-opt = torch.optim.Adam(deep_model.parameters(),lr = .001)
-loss_func = nn.MSELoss()
-for i in range(0,len(root_freq),8):
-    pred_freq = deep_model(data_set[i:i+8].unsqueeze(1))
-    loss = loss_func(pred_freq.squeeze(1),target[i:i+8])
+    def open_data(self,directory,frame_len,frame_quantity):
+        # takes a file directory, opens all files within it and determines the note based on a _(note) at the end (not comprehensive; to add)
+        # then breaks apart the files into it's plucks, and returns it all as one 
+        # indexed file with evenly segmented samples and with sound data attached
+        file = Path(directory)
+        files = list(file.iterdir())
 
-    opt.zero_grad()
-    loss.backward()
-    opt.step()
+        frame_freq = []
+        sample = []
 
-print("training complete")
+        for i in range(0,len(files)):
+            freq_decoder = files[i].stem.split("_")[-1]
+            frequency = self.note_frequencies[freq_decoder]
+            sr,values = scipy.io.wavfile.read(files[i])
+            frames,strikes = os(values,frame_len,sr)
+
+            for j in strikes:
+
+                frame_freq.append(frequency)
+
+                segment = np.abs(np.fft.rfft(values[j*frame_len//2:(j+frame_quantity)*frame_len//2]))
+                wave = np.log1p(segment/(np.max(segment) + 1e-8))
+                sample.append(torch.tensor(wave,dtype=torch.float32))
+
+        self.sample_rate = sr
+
+        return sample,frame_freq
+
+class model(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # set up 5 layers. The first 3 are to identify how the amplitudes change, making them convolutional layers, so that they
+        # can take in data coming in from a small section of time
+        #  the last two are linear layers, to connect and compact the information output from the convolutional layers into an 
+        # estimation
+        self.L1 = nn.Conv1d(1,8,kernel_size=9,padding=4,stride = 2)
+        #self.B1 = nn.BatchNorm1d(8)
+
+        self.L2 = nn.Conv1d(8,16,kernel_size = 9,padding = 4,stride = 2)
+        #self.B2 = nn.BatchNorm1d(16)       # commenting this off means taking it out of each of the functional layers. So remember to add back in after relu
+
+        self.L3 = nn.Conv1d(16,32,kernel_size=9,padding=4,stride = 2)
+        #self.B3 = nn.BatchNorm1d(32)
+
+        self.L4 = nn.Linear(32*257,32)
+
+        self.L5 = nn.Linear(32,1)
+
+
+    def forward(self,x):
+        # this forward function is a key one in Torch.Module, as it is immediately called if an input is given to the module function
+        # this one connects all the predefined layers and then returns their single number output. The model will be trained onto
+        # a logarithm of the root frequency output instead of the actual frequency because logarithmic frequecy increases linearly for frequency
+
+        x = nn.functional.relu(self.L1(x)) # relu is weird. theres too much to be said about it in one comment, but its practically np.max(f,0)
+        # essentially, its a max(num,0), though apparently more efficient. 
+        x = nn.functional.relu(self.L2(x))
+
+        x = nn.functional.relu(self.L3(x))
+
+        x = x.flatten(1)
+
+        x = nn.functional.relu(self.L4(x))
+
+        x = self.L5(x)
+
+        return x
+
+
+if __name__ == "__main__":
+    data_set = Audio_data_set(r"C:\Users\joeth\OneDrive\Documents\sound_data_file\sound_data")
+
+    deep_model = model()
+
+    dataloader = DataLoader(data_set,batch_size=9,shuffle=False)
+    opt = torch.optim.Adam(deep_model.parameters(),lr = .001)
+    lossfunc = nn.MSELoss()
+
+    for epoch in range(0,500):
+        deep_model.train()
+        for frames,frequencies in dataloader:
+            
+            frames = frames.unsqueeze(1)
+            frequency = torch.log2(frequencies/440)
+
+            pred = deep_model(frames.float())
+
+            loss = lossfunc(pred.squeeze(1),frequency)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+        print(f"epoch:{epoch},loss:{loss}")
+    with torch.no_grad():
+
+        for frames, frequencies in dataloader:
+
+            frames = frames.unsqueeze(1)
+            pred = deep_model(frames).squeeze(1)
+
+    
+    torch.save(deep_model.state_dict(), "guitar_frequency_model.pth")
+# the structure is (batchsize,channels,samples)
+# there should always be just one channel for audio stuff, but batchsize may vary depending on the length of the input
+# input cannot be stereo data: stereo data has 2 channels, not one. It needs some adjustment to be worked in
+    sample_rate,values = scipy.io.wavfile.read(r"C:\Users\joeth\OneDrive\Documents\sound_data_file\one_file_test\BgBs_A2.wav")
+    frames, guitar_strikes = os(values,2048,sample_rate)
+
+    analyzed_frames = []
+
+    for i in guitar_strikes:
+        segment = np.abs(np.fft.rfft(values[i*1024:(i+4)*1024])) # a note about the onset detection, it overlaps 50% of each frame. So, youre only hopping 1024 values, not 2048
+        wave = np.log1p(segment/(np.max(segment) + 1e-8))
+        analyzed_frames.append(wave)
+
+    analyzed_frames = torch.tensor(analyzed_frames).unsqueeze(1)
+    deep_model.eval()
+
+    with torch.no_grad():
+        pred = deep_model(analyzed_frames.float())
+        target_vals = [np.log2(110/440) for i in guitar_strikes]
+        target = torch.tensor(target_vals,dtype=torch.float32).unsqueeze(1) 
+
+
+    print(pred)
+    print(target)
+    print(440*(2**pred))
