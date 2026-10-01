@@ -2,6 +2,50 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 
+class freq_operator:
+    def __init__(self,segment,sample_rate,harmonics_observed,frame_length):
+
+        self.frequencies = np.array(np.fft.rfftfreq(len(segment),1/sample_rate)) # frequencies may change size depending on the number of points in each bin, so redefine every iteration
+        self.segment = segment
+
+        self.sample_rate = sample_rate
+        self.frame_length = frame_length
+
+        self.harmonics_observed = harmonics_observed
+
+        self.struck_freq_amps = np.abs(np.fft.rfft(segment))
+        
+        self.root_frequency = float(self.root_frequency_detection())
+        self.harmonics_idx = self.higher_harmonics_list()
+
+    def higher_harmonics_list(self):
+        higher_harmonics = np.arange(1,self.harmonics_observed + 1)*self.root_frequency    # create a list of higher harmonics
+        return [round(i*len(self.segment)/self.sample_rate) for i in higher_harmonics if round(i*len(self.segment)/self.sample_rate) < self.frame_length] # find the amplitude roughly around each of the higher harmonics
+    
+    def root_frequency_detection(self):
+        # takes a segment as an input, with
+    
+        deep_model = model()
+        deep_model.load_state_dict(torch.load("guitar_frequency_model.pth"))
+        deep_model.eval()
+
+        analyzed_frames = []
+        analyzed_frames.append(np.log1p(self.struck_freq_amps/(np.max(self.struck_freq_amps) + 1e-8)))
+
+        analyzed_frames = torch.tensor(np.array(analyzed_frames)).unsqueeze(1)
+
+        with torch.no_grad():
+            pred = deep_model(analyzed_frames.float())
+        predicted_hz = 2**pred.squeeze() *440
+
+        return predicted_hz
+    
+    def amplitude_detection(self):
+        amps = np.array([np.max(self.struck_freq_amps[j-2:j+3]) for j in self.harmonics_idx])       # find the amplitudes of the harmonics by finding the peaks around
+                # the estimated harmonics, then using those ( the radius for the search is 2 at the moment)
+        return amps/np.max(amps) # normalize the amplitudes
+
+
 if __name__ == "__main__":
 ## define variables and designate vector spaces______________________________
     frame_length = 2048         # how many samples that each frame that youre analyzing has
