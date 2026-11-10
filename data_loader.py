@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-import harmonic_functions as hf
+import audio_analysis as au
 from pathlib import Path
 import numpy as np
 
@@ -61,7 +61,7 @@ class Audio_data_set(Dataset):
         # takes a file directory, opens all files within it and determines the note based on a _(note) at the end (not comprehensive; to add)
         # then breaks apart the files into it's plucks, and returns it all as one 
         # indexed file with evenly segmented samples and with sound data attached
-        operand = hf.audio_file_operator(directory,frame_len,hop_percent,frames_analyzed)
+        operand = au.audio_file_operator(directory,frame_len,hop_percent,frames_analyzed)
         freq_decoder = directory.stem.split("_")[-1]
         frequency = self.note_frequencies[freq_decoder]
         onst = operand.onsets
