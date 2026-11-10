@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 import torch
 import numpy as np
 import torch.nn as nn
-import harmonic_functions as hf
+import audio_analysis as au
 import model
 from data_loader import Audio_data_set
 
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     opt = torch.optim.Adam(deep_model.parameters(),lr = .001)
     lossfunc = nn.MSELoss()
 
-    operand = hf.audio_file_operator(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data\deep_learning_learning_data\Gs_D3.wav",frame_len,hop_percent,frames_analyzed)
+    operand = au.audio_file_operator(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data\deep_learning_learning_data\Gs_D3.wav",frame_len,hop_percent,frames_analyzed)
 
     guitar_strikes = operand.onsets
 
