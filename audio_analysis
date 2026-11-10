@@ -1,0 +1,172 @@
+import numpy as np
+import librosa
+import model
+import torch
+import warnings
+
+class audio_file_operator():
+    def __init__(self,file_path,frame_length,hop_percent,frames_analyzed,fmin = int(librosa.note_to_hz("C2")),fmax = int(librosa.note_to_hz("C7"))):
+        
+        self.y,self.sr = librosa.load(file_path,sr = None)    #this is the frames at the recorded sample rate
+        self.hop_percent = hop_percent
+        self.hop = int(frame_length*hop_percent/100)
+
+        self.frame_length = frame_length
+
+        self.frames = self.subdivide(self.y,1)
+        self.other_frames = self.subdivide(self.y,2)        # onset detection needs more samples in a frame to be accurate, so
+        # the frame size is doubled, in addition to the sample rate being halved
+        
+        self.fmin = fmin
+        self.fmax = fmax
+
+        self.frames_analyzed = frames_analyzed # the number of frames analyzed after a detected strike (including the detection frame)
+
+        self.window = np.hanning(frame_length) # a hanning window to reduce spectral loss at the ends of frames
+
+        self.hop_length = int(hop_percent/100*self.frame_length) # giving a hop percent makes the hop length this
+
+        self.onsets = self.detect_onsets(self.other_frames,len(self.other_frames[0])//len(self.frames[0])) # onsets has some issues. FIX!
+        self.onset_frames = self.onset_frames_loader(self.frames,self.onsets)
+        
+        self.f0 = self.f0_()    # the root frequency of whatever note is played
+
+    def subdivide(self,segment,multiplier):
+        # a function to break the signal into frames
+        frame = librosa.util.frame(segment,frame_length=self.frame_length * multiplier,hop_length=self.hop*multiplier)
+        return frame.T
+
+    def detect_onsets(self,frames,multiplier):
+        onsets = []
+        # finds the flux of every single frame, then runs through all of it and returns the indexes of the onset frames
+        window = np.hanning(self.frame_length*int(multiplier))
+        # because the onsets require more content in a frame to accurately detect one, Ive included a multiplier to automatically correct for it
+        fft_frames = np.abs(np.fft.rfft(frames*window, axis=1))
+
+        envelope = self.flux(fft_frames,len(fft_frames),peram="max")    # this envelope shows the energy output of the signal over time
+        RMS_envelope = np.sqrt(np.mean(frames**2,axis = 1)) # this envelope shows the strength of the signal at any given moment
+
+        predicted_onsets = librosa.onset.onset_detect(onset_envelope=envelope,sr=self.sr, hop_length=self.hop_length*multiplier,units="frames",wait = 1)
+        predicted_signal_increase = librosa.onset.onset_detect(onset_envelope=RMS_envelope,sr=self.sr, hop_length=self.hop_length*multiplier,units="frames",wait = 1)
+
+        for i in predicted_signal_increase:
+            if np.min(np.abs(predicted_onsets - i)) <= 2: # note: the 2 may have to be adjusted. It limits onsets to 2/sr*frame_size seconds
+                #consider this part as seeing if any frame has both a large increase in energy from the last frame, and a large amount of energy in general
+                index = predicted_onsets[np.argmin(np.abs(predicted_onsets - i))]
+
+                if np.intersect1d(onsets,index).size == 0:
+                    onsets.append(index)    # make sure you dont accidentally take the same onset twice
+
+        return np.array(onsets) * multiplier
+
+    def onset_frames_loader(self,frames,onsets):
+        onset_frames = []
+        for i in onsets:
+            segment = []
+
+            for j in range(0,self.frames_analyzed):
+                if i + j < len(frames):
+                    extent = frames[i+j] # onset index + [0:frames_analyzed]
+                else:
+                    break
+
+                if len(extent) < self.frame_length:
+                    extent = np.pad(extent,(0,self.frame_length-len(extent)))   # if the frame isnt long enough, pad it with 0s
+
+                segment.append(np.abs(np.fft.rfft(extent*self.window))) # pack all the frames into one segment
+
+            onset_frames.append(np.log1p(segment/(np.max(segment) + 1e-8))) # pack all the segments into one output of size [onsets,frames_analyzed,frame_len]
+        
+        return np.array(onset_frames)
+
+
+    def f0_(self):
+        # this whole thing is because librosas PYIN can produce octave errors, which is not good, but it has a very accurate frequency estimation
+        # otherwise. 
+
+        deep_model = model.model(frames_analyzed=self.frames_analyzed)
+
+        deep_model.load_state_dict(torch.load("guitar_frequency_model.pth")) # loading in the already made weights of the deep_model
+
+        deep_model.eval() # this means: dont change the deep model in this next part
+
+        with torch.no_grad(): # SERIOUSLY, DONT CHANGE THE DEEP MODEL
+            prediction = deep_model(torch.tensor(np.array(self.onset_frames)).float()).squeeze() # here is our actual prediction part
+
+        fo,_,_ = librosa.pyin(self.y,frame_length=self.frame_length,sr = self.sr,fmin = self.fmin,fmax = self.fmax,hop_length = self.hop,center=False,fill_na=None)
+        # ok, so as a note: the deep model created earlier does work remarkably well. However, librosa will be more accurate in general, 
+        # because it uses autocorrelation, which will be a much more accurate estimation of the root frequency. So  use the model to 
+        # give a rough estimation of the root frequency, then use librosa to hone that in
+        
+        guessed_f0 = []
+
+        root_freq_est = (2**prediction *440).detach().cpu().numpy() # the model returns the log(f0/440) for ... reasons. Thats right. You know what! Who wrote this program?
+        # Its on a need to know basis. Think it through if you want to
+        for i in range(0,len(self.onsets)):
+            index = self.stable(fo[self.onsets[i]:self.onsets[i]+25])   # +25 means the amount of frames we want to check for consistency, i.e.
+            # the amount of time we think the note will be stable. as a note, this is primarily for testing purposes, and will have to be lowered later on
+
+            if not index :
+                warnings.warn("no root frequency. Using less acurate estimation")
+                guessed_f0.append(root_freq_est[i]) # default to the model if theres not consistent note found
+            else:
+                correction = [np.log2(root_freq_est[i]/fo[self.onsets[i]+j]) for j in index]    #this is a correction term
+                # log2 is to put it into a linear scale, and then look at their ratio in that linear scale
+
+                if not np.any(np.abs(correction - np.round(correction)) < .15): # if the difference of the linear scale correction to its 
+                    # hypothetical perfect harmonic (which would be an integer, as a multiple of the root) is too big, then
+                    guessed_f0.append(root_freq_est[i]) # default to the model if the consistent note is not at all close to the model
+                else:
+                    dif = np.argmin(np.abs(np.round(correction) - correction)) 
+                    guessed_f0.append(fo[self.onsets[i] + index[dif]] * 2**np.round(correction[dif]))
+                    # use librosa's pyin if its close enough and accurate enough to the model
+
+        f0 = np.array(guessed_f0)
+
+        return f0
+
+    def stable(self,f0s,tolerance = .01):
+        # this function checks to see how stable any given note is in the frame. it returns all notes from frames
+        # which are consistent (with a default tolerance of .01) for 3 frames at least. tolerances and frame counts will later probably have to 
+        # be adjusted
+        stable_idx = []
+        for i in range(2, len(f0s)):
+            segment = f0s[i-2:i+1]
+            if np.all(np.abs(np.diff(segment)) / segment[:-1] <= tolerance):
+                stable_idx.append(i-2)
+        return stable_idx
+
+    def flux(self,frame,frame_end,frame_begin = 1,peram = None):
+        # determines the spectral flux coming from a matrix of samples
+
+        s_flux = []
+        if frame_begin < 1:
+            frame_begin = 1
+
+        for i in range(frame_begin,frame_end):
+            dev = frame[i] - frame[i-1]
+
+            if peram is not None:
+
+                if peram == "abs":
+                    dev = np.abs(dev)
+                elif peram == "max":
+                    dev = np.maximum(dev,0)
+
+            s_flux.append(np.sum(dev))
+
+        return s_flux
+
+    def higher_harmonics_list(self,segment,f0,harmonics_observed = 20):
+        # returns the indexes in an rfft of the segment where the root frequency and harmonics up to harmonics_served are located
+        fft_seg = np.abs(np.fft.rfft(segment))
+
+        higher_harmonics = np.arange(1,harmonics_observed + 1)*f0    # create a list of higher harmonics
+
+        approx_idx = [round(i*len(segment)/self.sr) for i in higher_harmonics if round(i*len(segment)/self.sr) < self.frame_length] # find the amplitude roughly around each of the higher harmonics
+        
+        search_width = round(f0*len(segment)/self.sr/4)
+        bottom_idx = [int(i - search_width) if i - search_width >-1 else 0 for i in approx_idx]
+        top_idx = [int(i + search_width) if i + search_width < self.frame_length else self.frame_length for i in approx_idx]
+        
+        return [bottom_idx[i] + np.argmax(fft_seg[bottom_idx[i] : top_idx[i]]) for i in range(0,len(approx_idx))]   # using a relatively sized search, identify the highest points around the approx_idx
