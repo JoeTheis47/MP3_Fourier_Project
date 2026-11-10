@@ -14,7 +14,7 @@ if __name__ == "__main__":
     analyzed_frames = []
     segment = []
 
-    data_set = Audio_data_set(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data\deep_learning_learning_data",frame_len,frames_analyzed=frames_analyzed)
+    data_set = Audio_data_set(r(input file path here to learning data),frame_len,frames_analyzed=frames_analyzed)
     dataloader = DataLoader(data_set,batch_size=9,shuffle=True)
 
 
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     opt = torch.optim.Adam(deep_model.parameters(),lr = .001)
     lossfunc = nn.MSELoss()
 
-    operand = au.audio_file_operator(r"C:\Users\joeth\OneDrive\Documents\deep_learning_data\deep_learning_learning_data\Gs_D3.wav",frame_len,hop_percent,frames_analyzed)
+    operand = au.audio_file_operator(r(input file path here to testing data),frame_len,hop_percent,frames_analyzed)
 
     guitar_strikes = operand.onsets
 
