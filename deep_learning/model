@@ -6,16 +6,16 @@ class model(nn.Module):
         # can take in data coming in from a small section of time
         #  the last two are linear layers, to connect and compact the information output from the convolutional layers into an 
         # estimation
-        self.L1 = nn.Conv1d(1,8,kernel_size=9,padding=4,stride = 2)
+        self.L1 = nn.Conv1d(in_channels=frames_analyzed,out_channels = 8,kernel_size=9,padding=4,stride = 2)
         #self.B1 = nn.BatchNorm1d(8)
 
-        self.L2 = nn.Conv1d(8,16,kernel_size = 9,padding = 4,stride = 2)
+        self.L2 = nn.Conv1d(8,12,kernel_size = 9,padding = 4,stride = 2)
         #self.B2 = nn.BatchNorm1d(16)       # commenting this off means taking it out of each of the functional layers. So remember to add back in after relu
 
-        self.L3 = nn.Conv1d(16,32,kernel_size=9,padding=4,stride = 2)
+        self.L3 = nn.Conv1d(12,16,kernel_size=9,padding=4,stride = 2)
         #self.B3 = nn.BatchNorm1d(32)
 
-        self.L4 = nn.Linear(32*257,32)
+        self.L4 = nn.Linear(129*16,32)
 
         self.L5 = nn.Linear(32,1)
 
